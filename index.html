@@ -564,17 +564,14 @@ async function loadSheets() {
     S.DB = FALLBACK; return;
   }
 
-  // Читаємо CSV — найпростіший формат без CORS проблем
-  // Google Sheets публічно віддає CSV через export endpoint
   async function fetchCSV(sheetName) {
-    const url = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEETS_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+    const url = 'https://docs.google.com/spreadsheets/d/' + CONFIG.SHEETS_ID + '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${sheetName}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + sheetName);
     const text = await res.text();
     return parseCSV(text);
   }
 
-  // CSV парсер що розуміє лапки і коми всередині значень
   function parseCSV(text) {
     const lines = [];
     let cur = '', inQ = false, row = [];
@@ -582,32 +579,27 @@ async function loadSheets() {
       const ch = text[i];
       if (ch === '"') {
         if (inQ && text[i+1] === '"') { cur += '"'; i++; }
-        else inQ = !inQ;
+        else { inQ = !inQ; }
       } else if (ch === ',' && !inQ) {
         row.push(cur.trim()); cur = '';
-      } else if ((ch === '
-' || ch === '
-') && !inQ) {
-        if (cur || row.length) { row.push(cur.trim()); lines.push(row); }
-        cur = ''; row = [];
-        if (ch === '
-' && text[i+1] === '
-') i++;
+      } else if (ch === '\n' && !inQ) {
+        row.push(cur.trim()); lines.push(row); cur = ''; row = [];
+      } else if (ch === '\r' && !inQ) {
+        row.push(cur.trim()); lines.push(row); cur = ''; row = [];
+        if (text[i+1] === '\n') i++;
       } else {
         cur += ch;
       }
     }
     if (cur || row.length) { row.push(cur.trim()); lines.push(row); }
-
     if (lines.length < 2) return [];
-    const headers = lines[0].map(h => h.replace(/^"+|"+$/g, '').trim());
+    const headers = lines[0].map(function(h){ return h.replace(/^"+|"+$/g,'').trim(); });
     return lines.slice(1)
-      .filter(row => row.some(c => c && c.replace(/^"+|"+$/g, '').trim()))
-      .map(row => {
+      .filter(function(row){ return row.some(function(c){ return c && c.replace(/^"+|"+$/g,'').trim(); }); })
+      .map(function(row) {
         const obj = {};
-        headers.forEach((h, i) => {
-          let val = (row[i] || '').replace(/^"+|"+$/g, '').trim();
-          // Конвертуємо числа
+        headers.forEach(function(h, i) {
+          let val = (row[i] || '').replace(/^"+|"+$/g,'').trim();
           const num = Number(val);
           obj[h] = (val !== '' && !isNaN(num)) ? num : val;
         });
@@ -618,15 +610,16 @@ async function loadSheets() {
   const tabs = ['models','recipes','ingredients','videos','acc_cards'];
   const result = {};
   try {
-    for (const tab of tabs) {
-      document.getElementById('load-msg').textContent = `Завантаження: ${tab}…`;
+    for (let t = 0; t < tabs.length; t++) {
+      const tab = tabs[t];
+      document.getElementById('load-msg').textContent = 'Завантаження: ' + tab + '…';
       result[tab] = await fetchCSV(tab);
-      console.log(`✓ ${tab}:`, result[tab].length, 'рядків');
+      console.log('OK ' + tab + ': ' + result[tab].length + ' rows');
     }
     S.DB = result;
-    console.log('✅ Google Sheets завантажено успішно!');
+    console.log('Google Sheets loaded!');
   } catch(e) {
-    console.warn('⚠️ Sheets помилка, використовуємо fallback:', e.message);
+    console.warn('Sheets error, fallback:', e.message);
     S.DB = FALLBACK;
   }
 }
