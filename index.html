@@ -563,30 +563,54 @@ async function loadSheets() {
   if (CONFIG.SHEETS_ID === 'YOUR_GOOGLE_SHEETS_ID') {
     S.DB = FALLBACK; return;
   }
+
+  // Використовуємо JSONP через script tag — обходить CORS
+  function fetchSheetJSON(sheetName) {
+    return new Promise((resolve, reject) => {
+      const callbackName = 'sheetCB_' + sheetName + '_' + Date.now();
+      const url = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEETS_ID}/gviz/tq?tqx=out:json&tq=select+*&sheet=${encodeURIComponent(sheetName)}&callback=${callbackName}`;
+      const script = document.createElement('script');
+      const timer = setTimeout(() => {
+        delete window[callbackName];
+        document.head.removeChild(script);
+        reject(new Error('Timeout: ' + sheetName));
+      }, 10000);
+      window[callbackName] = function(data) {
+        clearTimeout(timer);
+        delete window[callbackName];
+        document.head.removeChild(script);
+        resolve(data);
+      };
+      script.src = url;
+      script.onerror = () => { clearTimeout(timer); reject(new Error('Script error: ' + sheetName)); };
+      document.head.appendChild(script);
+    });
+  }
+
   const tabs = ['models','recipes','ingredients','videos','acc_cards'];
   const result = {};
   try {
     for (const tab of tabs) {
       document.getElementById('load-msg').textContent = `Завантаження: ${tab}…`;
-      const url = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEETS_ID}/gviz/tq?tqx=out:json&sheet=${tab}`;
-      const res = await fetch(url);
-      const text = await res.text();
-      const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
-      const cols = json.table.cols.map(c => c.label);
-      result[tab] = json.table.rows
+      const data = await fetchSheetJSON(tab);
+      const cols = data.table.cols.map(c => c.label).filter(l => l && l.trim());
+      result[tab] = (data.table.rows || [])
         .filter(row => row.c && row.c.some(c => c && c.v !== null && c.v !== ''))
         .map(row => {
           const obj = {};
           cols.forEach((col, i) => {
             const cell = row.c[i];
-            obj[col] = cell ? (cell.v !== null && cell.v !== undefined ? cell.v : '') : '';
+            let val = cell ? (cell.v !== null && cell.v !== undefined ? cell.v : '') : '';
+            // Числові значення — залишаємо числами
+            obj[col] = val;
           });
           return obj;
         });
     }
     S.DB = result;
+    console.log('Sheets loaded OK:', Object.keys(result).map(k => k + ':' + result[k].length));
   } catch(e) {
-    console.warn('Sheets failed, using fallback:', e);
+    console.warn('Sheets load error, using fallback:', e.message);
     S.DB = FALLBACK;
   }
 }
